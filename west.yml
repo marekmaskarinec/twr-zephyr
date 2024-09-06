@@ -1,13 +1,9 @@
 manifest:
   self:
     path: twr
-  remotes:
-    - name: marekmaskarinec
-      url-base: https://github.com/marekmaskarinec
-
   projects:
     - name: zephyr
-      remote: marekmaskarinec
+      url: https://github.com/marekmaskarinec/zephyr
       revision: main
       import:
         name-allowlist:
