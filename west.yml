@@ -1,0 +1,14 @@
+manifest:
+  self:
+    path: twr
+  remotes:
+    - name: marekmaskarinec
+      url-base: https://github.com/marekmaskarinec
+
+  projects:
+    - name: zephyr
+      remote: marekmaskarinec
+      revision: main
+      import:
+        name-allowlist:
+          - hal_stm32
