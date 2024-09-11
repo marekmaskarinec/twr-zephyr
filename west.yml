@@ -8,3 +8,4 @@ manifest:
       import:
         name-allowlist:
           - hal_stm32
+          - cmsis

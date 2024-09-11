@@ -1,0 +1,10 @@
+identifier: core_module
+name: Tower Core Module
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+  - gnuarmemb
+  - xtools
+ram: 20
+flash: 192

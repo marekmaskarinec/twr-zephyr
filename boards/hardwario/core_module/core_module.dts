@@ -1,0 +1,56 @@
+/dts-v1/;
+#include <st/l0/stm32l083Xz.dtsi>
+
+/ {
+	model = "Tower Core Module";
+	compatible = "hardwario,core-module";
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		led0: led_0 {
+			gpios = <&gpioh 1 GPIO_ACTIVE_HIGH>;
+			label = "LED 0";
+		};
+	};
+
+	aliases {
+		led0 = &led0;
+	};
+};
+
+&clk_lsi {
+	status = "okay";
+};
+
+&clk_hsi48 {
+	status = "okay";
+};
+
+&clk_hsi {
+	status = "okay";
+};
+
+&pll {
+	status = "okay";
+	div = <2>;
+	mul = <3>;
+	clocks = <&clk_hsi>;
+};
+
+&rcc {
+	status = "okay";
+	clocks = <&pll>;
+	clock-frequency = <DT_FREQ_M(32)>;
+	ahb-prescaler = <1>;
+	apb1-prescaler = <1>;
+	apb2-prescaler = <1>;
+};
+
+&usb {
+	status = "okay";
+};
