@@ -1,5 +1,6 @@
 /dts-v1/;
 #include <st/l0/stm32l083Xz.dtsi>
+#include <st/l0/stm32l083c(b-z)tx-pinctrl.dtsi>
 
 / {
 	model = "Tower Core Module";
@@ -8,6 +9,8 @@
 	chosen {
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
+		zephyr,console = &usart1;
+		zephyr,shell-uart = &usart1;
 	};
 
 	leds {
@@ -38,7 +41,7 @@
 &pll {
 	status = "okay";
 	div = <2>;
-	mul = <3>;
+	mul = <4>;
 	clocks = <&clk_hsi>;
 };
 
@@ -51,6 +54,12 @@
 	apb2-prescaler = <1>;
 };
 
-&usb {
+&usart1 {
 	status = "okay";
+	pinctrl-0 = <&usart1_tx_pa9 &usart1_rx_pa10>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	parity = "none";
+	stop-bits = "1";
+	data-bits = <8>;
 };
