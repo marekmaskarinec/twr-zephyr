@@ -82,4 +82,11 @@
 		status = "okay";
 		reg = <0x49>;
 	};
+	
+	lis2dh@19 {
+		compatible = "st,lis2dh";
+		status = "okay";
+		reg = <0x19>;
+		irq-gpios = <&gpiob 6 GPIO_ACTIVE_HIGH>;
+	};
 };
