@@ -20,9 +20,17 @@
 			label = "LED 0";
 		};
 	};
+	
+	buttons {
+		compatible = "gpio-keys";
+		button0: button_0 {
+			gpios = <&gpioa 8 GPIO_ACTIVE_HIGH>;
+		};
+	};
 
 	aliases {
 		led0 = &led0;
+		sw0 = &button0;
 	};
 };
 
