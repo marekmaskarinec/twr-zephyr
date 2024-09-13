@@ -1,2 +1,0 @@
-config BOARD_CORE_MODULE
-	select SOC_STM32L083XX

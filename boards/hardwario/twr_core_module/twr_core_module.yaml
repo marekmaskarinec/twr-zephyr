@@ -1,4 +1,4 @@
-identifier: core_module
+identifier: twr_core_module
 name: Tower Core Module
 type: mcu
 arch: arm

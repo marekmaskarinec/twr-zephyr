@@ -4,7 +4,7 @@
 
 / {
 	model = "Tower Core Module";
-	compatible = "hardwario,core-module";
+	compatible = "hardwario,twr-core-module";
 
 	chosen {
 		zephyr,sram = &sram0;

@@ -1,6 +1,0 @@
-board:
-  name: core_module
-  vendor: hardwario
-  socs:
-  - name: stm32l083xx
-
