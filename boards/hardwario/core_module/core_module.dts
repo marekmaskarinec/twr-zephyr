@@ -71,3 +71,15 @@
 	stop-bits = "1";
 	data-bits = <8>;
 };
+
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&i2c2_scl_pb10 &i2c2_sda_pb11>;
+	pinctrl-names = "default";
+	
+	tmp112@49 {
+		compatible = "ti,tmp112";
+		status = "okay";
+		reg = <0x49>;
+	};
+};
