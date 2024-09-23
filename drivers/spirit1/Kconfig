@@ -1,0 +1,23 @@
+
+config SPIRIT1
+	bool "Spirit1"
+	depends on GPIO
+	depends on SPI
+
+if SPIRIT1
+
+module = SPIRIT1
+module-str = spirit1
+source "subsys/logging/Kconfig.template.log_config"
+
+config SPIRIT1_INIT_PRIORITY
+	int "Spirit1 Initialization priority"
+	default 90
+	help
+	  System initialization priority for Spirit1 drivers.
+	  
+config SPIRIT1_MAX_PACKET_SIZE
+	int "Maximum packet size"
+	default 64
+
+endif # SPIRIT1

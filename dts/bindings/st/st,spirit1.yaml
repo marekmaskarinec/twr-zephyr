@@ -1,0 +1,13 @@
+description: ST Spirit1
+
+compatible: "st,spirit1"
+
+include: [spi-device.yaml]
+
+properties:
+  irq-gpios:
+    type: phandle-array
+    required: true
+  sdn-gpios:
+    type: phandle-array
+    required: true

@@ -90,3 +90,19 @@
 		irq-gpios = <&gpiob 6 GPIO_ACTIVE_HIGH>;
 	};
 };
+
+&spi1 {
+	status = "okay";
+	pinctrl-0 = <&spi1_miso_pb4 &spi1_mosi_pb5 &spi1_sck_pb3>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpioa 15 GPIO_ACTIVE_LOW>;
+
+	spirit1: spirit1@0 {
+		status = "okay";
+		compatible = "st,spirit1";
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(1)>;
+		irq-gpios = <&gpioa 7 (GPIO_PULL_DOWN | GPIO_ACTIVE_LOW)>;
+		sdn-gpios = <&gpiob 7 GPIO_ACTIVE_HIGH>;
+	};
+};

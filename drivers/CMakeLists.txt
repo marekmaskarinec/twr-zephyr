@@ -1,0 +1,2 @@
+
+add_subdirectory_ifdef(CONFIG_SPIRIT1 spirit1)
