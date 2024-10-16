@@ -1,2 +1,3 @@
 
 add_subdirectory_ifdef(CONFIG_SPIRIT1 spirit1)
+add_subdirectory_ifdef(CONFIG_ATSHA204 atsha204)

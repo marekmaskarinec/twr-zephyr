@@ -1,0 +1,18 @@
+
+config ATSHA204
+	bool "atsha204"
+	depends on I2C
+
+if ATSHA204
+
+module = ATSHA204
+module-str = atsha204
+source "subsys/logging/Kconfig.template.log_config"
+
+config ATSHA204_INIT_PRIORITY
+	int "atsha204 Initialization priority"
+	default 90
+	help
+	  System initialization priority for atsha204 drivers.
+
+endif # ATSHA204

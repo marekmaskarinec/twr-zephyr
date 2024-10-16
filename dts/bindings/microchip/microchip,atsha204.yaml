@@ -1,0 +1,6 @@
+description: Microchip ATSHA204
+
+compatible: "microchip,atsha204"
+
+include: [i2c-device.yaml]
+

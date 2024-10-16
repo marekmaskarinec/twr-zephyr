@@ -1,5 +1,6 @@
 menu "Drivers"
 
+rsource "atsha204/Kconfig"
 rsource "spirit1/Kconfig"
 
 endmenu

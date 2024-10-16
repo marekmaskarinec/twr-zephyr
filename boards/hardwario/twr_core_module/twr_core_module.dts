@@ -89,6 +89,12 @@
 		reg = <0x19>;
 		irq-gpios = <&gpiob 6 GPIO_ACTIVE_HIGH>;
 	};
+	
+	atsha204@64 {
+		compatible = "microchip,atsha204";
+		status = "okay";
+		reg = <0x64>;
+	};
 };
 
 &spi1 {
