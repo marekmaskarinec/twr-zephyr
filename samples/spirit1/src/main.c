@@ -48,7 +48,7 @@ int main(void)
 
 		spirit1_tx(spirit1);
 		led_state = !led_state;
-		printf("LED state: %s\n", led_state ? "ON" : "OFF");
+		printf("Alive");
 		k_msleep(SLEEP_TIME_MS);
 	}
 	return 0;

@@ -35,7 +35,6 @@ static uint16_t crc16(uint8_t *buffer, uint8_t length)
 		data = *buffer;
 
 		for (shift_register = 0x01; shift_register > 0x00; shift_register <<= 1) {
-
 			data_bit = (data & shift_register) ? 1 : 0;
 
 			crc_bit = crc16 >> 15;
