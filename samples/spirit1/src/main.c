@@ -29,7 +29,6 @@ static const struct device *spirit1 = DEVICE_DT_GET(DT_NODELABEL(spirit1));
 int main(void)
 {
 	int ret;
-	bool led_state = true;
 
 	if (!gpio_is_ready_dt(&led)) {
 		return 0;
@@ -46,8 +45,7 @@ int main(void)
 			return 0;
 		}
 
-		spirit1_tx(spirit1);
-		led_state = !led_state;
+		spirit1_tx(spirit1, false, "Hello World", 11);
 		printf("Alive");
 		k_msleep(SLEEP_TIME_MS);
 	}

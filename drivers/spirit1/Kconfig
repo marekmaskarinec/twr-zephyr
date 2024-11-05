@@ -1,6 +1,7 @@
 
 config SPIRIT1
 	bool "Spirit1"
+	select EVENTS
 	depends on GPIO
 	depends on SPI
 
@@ -15,9 +16,6 @@ config SPIRIT1_INIT_PRIORITY
 	default 90
 	help
 	  System initialization priority for Spirit1 drivers.
-	  
-config SPIRIT1_MAX_PACKET_SIZE
-	int "Maximum packet size"
-	default 64
+
 
 endif # SPIRIT1
