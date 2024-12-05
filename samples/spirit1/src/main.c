@@ -39,15 +39,33 @@ int main(void)
 		return 0;
 	}
 
+	uint8_t buf[64];
+
+	ret = spirit1_config(spirit1, SPIRIT1_BAND_868, 0);
+	if (ret < 0) {
+		printf("Error %d\n", ret);
+		return 0;
+	}
+
 	while (1) {
 		ret = gpio_pin_toggle_dt(&led);
 		if (ret < 0) {
 			return 0;
 		}
 
-		spirit1_tx(spirit1, false, "Hello World", 11);
-		printf("Alive");
-		k_msleep(SLEEP_TIME_MS);
+		ret = spirit1_rx(spirit1, buf, sizeof(buf), K_FOREVER);
+		if (ret < 0) {
+			printf("Error %d\n", ret);
+		} else {
+			printf("Received %d bytes\n", ret);
+			for (int i = 0; i < ret; i++) {
+				printf("%02x ", buf[i]);
+			}
+			printf("\n");
+			printf("%*s\n", ret, buf);
+		}
+
+		// k_msleep(SLEEP_TIME_MS);
 	}
 	return 0;
 }
