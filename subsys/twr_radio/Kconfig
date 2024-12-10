@@ -1,0 +1,27 @@
+
+config TWR_RADIO
+	bool "TWR_RADIO"
+	
+if TWR_RADIO
+
+module = TWR_RADIO
+module-str = Tower Radio Protocol
+source "subsys/logging/Kconfig.template.log_config"
+
+config TWR_RADIO_SHELL
+	bool "Enable TWR_RADIO shell"
+	default y
+	depends on SHELL && TWR_RADIO
+	
+choice
+	prompt "Radio band"
+	
+config TWR_RADIO_BAND_868
+	bool "868 MHz"
+
+config TWR_RADIO_BAND_915
+	bool "915 MHz"
+	
+endchoice
+
+endif # TWR_RADIO

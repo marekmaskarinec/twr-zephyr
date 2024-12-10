@@ -26,6 +26,43 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 static const struct device *spirit1 = DEVICE_DT_GET(DT_NODELABEL(spirit1));
 
+static int event_cb(enum spirit1_event event, void *user_data)
+{
+	switch (event) {
+	case SPIRIT1_EVENT_RX_DATA_READY:
+		LOG_INF("SPIRIT1_EVENT_RX_DATA_READY\n");
+		uint8_t buf[64];
+		int ret = spirit1_get_rx_data(spirit1, buf, sizeof(buf));
+		if (ret < 0) {
+			LOG_INF("Error %d\n", ret);
+		} else {
+			LOG_HEXDUMP_INF(buf, ret, "Received data:");
+		}
+
+		spirit1_rx(spirit1, K_MSEC(1000));
+
+		break;
+	case SPIRIT1_EVENT_RX_DATA_DISC:
+		LOG_INF("SPIRIT1_EVENT_RX_DATA_DISC\n");
+		break;
+	case SPIRIT1_EVENT_RX_TIMEOUT:
+		LOG_INF("SPIRIT1_EVENT_RX_TIMEOUT\n");
+		spirit1_rx(spirit1, K_MSEC(1000));
+		break;
+	case SPIRIT1_EVENT_TX_DATA_SENT:
+		LOG_INF("SPIRIT1_EVENT_TX_DATA_SENT\n");
+		break;
+	case SPIRIT1_EVENT_MAX_BO_CCA_REACH:
+		LOG_INF("SPIRIT1_EVENT_MAX_BO_CCA_REACH\n");
+		break;
+	default:
+		LOG_INF("Unknown event\n");
+		break;
+	}
+
+	return 0;
+}
+
 int main(void)
 {
 	int ret;
@@ -39,13 +76,15 @@ int main(void)
 		return 0;
 	}
 
-	uint8_t buf[64];
-
 	ret = spirit1_config(spirit1, SPIRIT1_BAND_868, 0);
 	if (ret < 0) {
 		printf("Error %d\n", ret);
 		return 0;
 	}
+
+	spirit1_set_event_cb(spirit1, event_cb, NULL);
+
+	spirit1_rx(spirit1, K_MSEC(1000));
 
 	while (1) {
 		ret = gpio_pin_toggle_dt(&led);
@@ -53,19 +92,7 @@ int main(void)
 			return 0;
 		}
 
-		ret = spirit1_rx(spirit1, buf, sizeof(buf), K_FOREVER);
-		if (ret < 0) {
-			printf("Error %d\n", ret);
-		} else {
-			printf("Received %d bytes\n", ret);
-			for (int i = 0; i < ret; i++) {
-				printf("%02x ", buf[i]);
-			}
-			printf("\n");
-			printf("%*s\n", ret, buf);
-		}
-
-		// k_msleep(SLEEP_TIME_MS);
+		k_msleep(SLEEP_TIME_MS);
 	}
 	return 0;
 }

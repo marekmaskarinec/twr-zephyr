@@ -44,11 +44,10 @@ static struct spirit1_data {
 	struct gpio_callback irq_gpio_cb;
 	struct k_spinlock spi_lock;
 	struct k_mutex lock;
-	struct k_event event;
-	struct k_work irg_work;
+	struct k_work irq_work;
 	bool csma_enabled;
-	void *rx_data;
-	size_t rx_length;
+	spirit1_event_cb event_cb;
+	void *user_data;
 } dev_data;
 
 #define EVENT_TX_DONE    BIT(0)
@@ -85,10 +84,17 @@ static void go_to_ready()
 	SpiritCmdStrobeReady();
 }
 
+static void invoke_cb(enum spirit1_event event)
+{
+	if (dev_data.event_cb) {
+		dev_data.event_cb(event, dev_data.user_data);
+	}
+}
+
 static void gpio_irq_handler(const struct device *gpiob, struct gpio_callback *cb, uint32_t pins)
 {
 	gpio_pin_interrupt_configure_dt(&dev_config.irq_gpio, GPIO_INT_DISABLE);
-	k_work_submit(&dev_data.irg_work);
+	k_work_submit(&dev_data.irq_work);
 }
 
 static void irq_handler(struct k_work *work)
@@ -97,46 +103,34 @@ static void irq_handler(struct k_work *work)
 	SpiritIrqGetStatus(&irqs);
 
 	uint8_t *pirqs = (uint8_t *)&irqs;
-	LOG_INF("IRQ: 0x%02x%02x%02x%02x", pirqs[0], pirqs[1], pirqs[2], pirqs[3]);
+	LOG_DBG("IRQ: 0x%02x%02x%02x%02x", pirqs[0], pirqs[1], pirqs[2], pirqs[3]);
+
+	go_to_standby();
 
 	if (irqs.IRQ_RX_DATA_READY) {
-		LOG_INF("IRQ_RX_DATA_READY");
-		uint8_t len = SpiritPktBasicGetReceivedPktLength();
-		if (len > dev_data.rx_length) {
-			LOG_ERR("Packet too long: %d", len);
-			k_event_post(&dev_data.event, EVENT_RX_ERROR);
-			return;
-		}
-
-		RadioSpiReadFifo(len, dev_data.rx_data);
+		LOG_DBG("IRQ_RX_DATA_READY");
+		invoke_cb(SPIRIT1_EVENT_RX_DATA_READY);
 		SpiritCmdStrobeFlushRxFifo();
-		dev_data.rx_length = len;
-		k_event_post(&dev_data.event, EVENT_RX_DONE);
-
-		// gpio_pin_interrupt_configure_dt(&dev_config.irq_gpio, GPIO_INT_EDGE_TO_ACTIVE);
-		// SpiritCmdStrobeRx();
 	}
 	if (irqs.IRQ_RX_DATA_DISC) {
-		LOG_INF("IRQ_RX_DATA_DISC");
+		LOG_DBG("IRQ_RX_DATA_DISC");
+		invoke_cb(SPIRIT1_EVENT_RX_DATA_DISC);
 		SpiritCmdStrobeFlushRxFifo();
 		gpio_pin_interrupt_configure_dt(&dev_config.irq_gpio, GPIO_INT_EDGE_TO_ACTIVE);
 		SpiritCmdStrobeRx();
 	}
 	if (irqs.IRQ_RX_TIMEOUT) {
-		LOG_INF("IRQ_RX_TIMEOUT");
+		LOG_DBG("IRQ_RX_TIMEOUT");
+		invoke_cb(SPIRIT1_EVENT_RX_TIMEOUT);
 		SpiritCmdStrobeFlushRxFifo();
-		k_event_post(&dev_data.event, EVENT_RX_TIMEOUT);
-
-		// gpio_pin_interrupt_configure_dt(&dev_config.irq_gpio, GPIO_INT_EDGE_TO_ACTIVE);
-		// SpiritCmdStrobeRx();
 	}
 	if (irqs.IRQ_TX_DATA_SENT) {
-		LOG_INF("IRQ_TX_DATA_SENT");
-		k_event_post(&dev_data.event, EVENT_TX_DONE);
+		LOG_DBG("IRQ_TX_DATA_SENT");
+		invoke_cb(SPIRIT1_EVENT_TX_DATA_SENT);
 	}
 	if (irqs.IRQ_MAX_BO_CCA_REACH) {
-		LOG_INF("IRQ_MAX_BO_CCA_REACH");
-		k_event_post(&dev_data.event, EVENT_TX_ERROR);
+		LOG_DBG("IRQ_MAX_BO_CCA_REACH");
+		invoke_cb(SPIRIT1_EVENT_MAX_BO_CCA_REACH);
 	}
 }
 
@@ -145,9 +139,8 @@ static int spirit1_init(const struct device *dev)
 	int ret;
 
 	k_mutex_init(&dev_data.lock);
-	k_event_init(&dev_data.event);
 
-	k_work_init(&dev_data.irg_work, irq_handler);
+	k_work_init(&dev_data.irq_work, irq_handler);
 
 	if (!spi_is_ready_dt(&dev_config.bus)) {
 		LOG_ERR("SPI device not ready");
@@ -211,6 +204,33 @@ static int spirit1_init(const struct device *dev)
 	return 0;
 }
 
+static int api_spirit1_set_event_cb(const struct device *dev, spirit1_event_cb cb, void *user_data)
+{
+	k_mutex_lock(&dev_data.lock, K_FOREVER);
+
+	dev_data.event_cb = cb;
+	dev_data.user_data = user_data;
+
+	k_mutex_unlock(&dev_data.lock);
+
+	return 0;
+}
+
+static int api_spirit1_get_rx_data(const struct device *dev, void *data, size_t length)
+{
+	uint8_t recv_len = SpiritPktBasicGetReceivedPktLength();
+	if (recv_len > length) {
+		LOG_ERR("Packet too long: %d", recv_len);
+		return -ENOMEM;
+	}
+
+	if (data != NULL) {
+		RadioSpiReadFifo(recv_len, data);
+	}
+
+	return recv_len;
+}
+
 static int api_spirit1_config(const struct device *dev, enum spirit1_band band, uint8_t channel)
 {
 	int ret;
@@ -243,8 +263,6 @@ static int api_spirit1_config(const struct device *dev, enum spirit1_band band, 
 		return ret;
 	}
 
-	LOG_INF("After init");
-
 	PktBasicInit xBasicInit = {
 		.xPreambleLength = PKT_PREAMBLE_LENGTH_04BYTES,
 		.xSyncLength = PKT_SYNC_LENGTH_4BYTES,
@@ -260,8 +278,6 @@ static int api_spirit1_config(const struct device *dev, enum spirit1_band band, 
 
 	SpiritPktBasicInit(&xBasicInit);
 
-	LOG_INF("After pkt init");
-
 	PktBasicAddressesInit xAddressInit = {
 		.xFilterOnMyAddress = S_DISABLE,
 		.cMyAddress = 0x34,
@@ -272,8 +288,6 @@ static int api_spirit1_config(const struct device *dev, enum spirit1_band band, 
 	};
 
 	SpiritPktBasicAddressesInit(&xAddressInit);
-
-	LOG_INF("After addr init");
 
 	SpiritRadioPersistenRx(S_DISABLE);
 	SpiritRadioCsBlanking(S_DISABLE);
@@ -290,15 +304,12 @@ static int api_spirit1_config(const struct device *dev, enum spirit1_band band, 
 	SpiritCsmaInit(&csma_init);
 	SpiritQiSetRssiThresholddBm(-90); // RSSI threshold for CSMA
 
-	LOG_INF("After csma init");
-
 	go_to_standby();
 
 	return 0;
 }
 
-static int api_spirit1_rx(const struct device *dev, void *data, const size_t length,
-			  k_timeout_t timeout)
+static int api_spirit1_rx(const struct device *dev, k_timeout_t timeout)
 {
 	int ret = k_mutex_lock(&dev_data.lock, timeout);
 	if (ret) {
@@ -344,10 +355,6 @@ static int api_spirit1_rx(const struct device *dev, void *data, const size_t len
 		dev_data.csma_enabled = false;
 	}
 
-	dev_data.rx_data = data;
-	dev_data.rx_length = length;
-	k_event_clear(&dev_data.event, EVENT_RX_DONE | EVENT_RX_ERROR | EVENT_RX_TIMEOUT);
-
 	// IRQ registers blanking
 	SpiritIrqClearStatus();
 
@@ -359,28 +366,9 @@ static int api_spirit1_rx(const struct device *dev, void *data, const size_t len
 
 	SpiritCmdStrobeRx();
 
-	LOG_DBG("wait on event");
-
-	uint32_t event =
-		k_event_wait(&dev_data.event, EVENT_RX_DONE | EVENT_RX_ERROR | EVENT_RX_TIMEOUT,
-			     false, K_FOREVER);
-
-	go_to_standby();
-
 	k_mutex_unlock(&dev_data.lock);
 
-	if ((event & EVENT_RX_ERROR) != 0) {
-		LOG_ERR("RX error");
-		return -EIO;
-	} else if ((event & EVENT_RX_TIMEOUT) != 0) {
-		LOG_ERR("RX timeout");
-		return -ETIMEDOUT;
-	} else if (event == 0) {
-		LOG_ERR("event timeout");
-		return -ETIMEDOUT;
-	}
-
-	return dev_data.rx_length;
+	return 0;
 }
 
 static int api_spirit1_tx(const struct device *dev, bool csma, const void *data,
@@ -422,8 +410,6 @@ static int api_spirit1_tx(const struct device *dev, bool csma, const void *data,
 	SpiritCmdStrobeFlushTxFifo();
 	RadioSpiWriteFifo(length, (uint8_t *)data);
 
-	k_event_clear(&dev_data.event, EVENT_TX_DONE | EVENT_TX_ERROR);
-
 	// IRQ registers blanking
 	SpiritIrqClearStatus();
 
@@ -435,22 +421,7 @@ static int api_spirit1_tx(const struct device *dev, bool csma, const void *data,
 
 	SpiritCmdStrobeTx();
 
-	LOG_DBG("wait on event");
-
-	uint32_t event =
-		k_event_wait(&dev_data.event, EVENT_TX_DONE | EVENT_TX_ERROR, false, K_MSEC(500));
-
-	go_to_standby();
-
 	k_mutex_unlock(&dev_data.lock);
-
-	if ((event & EVENT_TX_ERROR) != 0) {
-		LOG_ERR("TX error");
-		return -EIO;
-	} else if (event == 0) {
-		LOG_ERR("TX timeout");
-		return -ETIMEDOUT;
-	}
 
 	return 0;
 }
@@ -477,6 +448,8 @@ static int api_spirit1_cw(const struct device *dev, bool enable)
 }
 
 static const struct spirit1_driver_api spirit1_driver_api = {
+	.get_rx_data = api_spirit1_get_rx_data,
+	.set_event_cb = api_spirit1_set_event_cb,
 	.config = api_spirit1_config,
 	.rx = api_spirit1_rx,
 	.tx = api_spirit1_tx,

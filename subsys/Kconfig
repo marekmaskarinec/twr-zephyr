@@ -1,0 +1,6 @@
+
+menu "Subsystems"
+
+rsource "twr_radio/Kconfig"
+
+endmenu
