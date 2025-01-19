@@ -44,6 +44,7 @@ typedef int (*spirit1_api_config)(const struct device *dev, enum spirit1_band ba
 typedef int (*spirit1_api_rx)(const struct device *dev, k_timeout_t timeout);
 typedef int (*spirit1_api_tx)(const struct device *dev, bool csma, const void *data,
 			      const size_t length);
+typedef int (*spirit1_api_standby)(const struct device *dev);
 typedef int (*spirit1_api_cw)(const struct device *dev, bool enable);
 /** @private */
 
@@ -53,6 +54,7 @@ struct spirit1_driver_api {
 	spirit1_api_config config;
 	spirit1_api_rx rx;
 	spirit1_api_tx tx;
+	spirit1_api_standby standby;
 	spirit1_api_cw cw;
 };
 
@@ -86,6 +88,12 @@ static inline int spirit1_tx(const struct device *dev, bool csma, const void *da
 {
 	const struct spirit1_driver_api *api = (const struct spirit1_driver_api *)dev->api;
 	return api->tx(dev, csma, data, length);
+}
+
+static inline int spirit1_standby(const struct device *dev)
+{
+	const struct spirit1_driver_api *api = (const struct spirit1_driver_api *)dev->api;
+	return api->standby(dev);
 }
 
 static inline int spirit1_cw(const struct device *dev, bool enable)

@@ -7,7 +7,7 @@
 /* Standard includes */
 #include <stddef.h>
 
-typedef enum {
+enum twr_radio_header {
 	TWR_RADIO_HEADER_PAIRING = 0x00,
 	TWR_RADIO_HEADER_PUB_PUSH_BUTTON = 0x01,
 	TWR_RADIO_HEADER_PUB_TEMPERATURE = 0x02,
@@ -43,8 +43,33 @@ typedef enum {
 	TWR_RADIO_HEADER_SUB_REG = 0x20,
 
 	TWR_RADIO_HEADER_ACK = 0xaa,
-} twr_radio_header_t;
+};
 
-int twr_radio_send(void *data, size_t data_len, k_timeout_t timeout);
+enum twr_radio_msg_type {
+	TWR_RADIO_MSG_TYPE_PUB = 0,
+	TWR_RADIO_MSG_TYPE_NODE = 1,
+	TWR_RADIO_MSG_TYPE_SUB = 2,
+};
+
+struct twr_radio_msg {
+	enum twr_radio_header header;
+	enum twr_radio_msg_type type;
+	uint16_t id;
+	union {
+		struct {
+			uint8_t data[51];
+			int data_len;
+		} pub;
+		struct {
+			uint64_t source_id;
+			uint8_t data[45];
+			int data_len;
+		} node;
+	};
+};
+
+int twr_radio_pub(struct twr_radio_msg *msg, k_timeout_t timeout);
+int twr_radio_recv(struct twr_radio_msg *msg, k_timeout_t timeout);
+void twr_radio_dump_msg(struct twr_radio_msg *msg);
 
 #endif /* TWR_RADIO_H_ */
