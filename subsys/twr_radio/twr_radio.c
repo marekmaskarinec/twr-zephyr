@@ -16,18 +16,17 @@
 LOG_MODULE_REGISTER(twr_radio, CONFIG_TWR_RADIO_LOG_LEVEL);
 
 struct send_msg {
-	void *queue_reserved;
 	struct k_sem ack_event;
 	uint16_t id;
 	void *data;
 	size_t data_len;
 };
 
-static K_QUEUE_DEFINE(m_send_queue);
+static K_MUTEX_DEFINE(m_mutex);
 
 static uint16_t m_msg_id_counter = 0;
-static atomic_t m_busy;
-static struct send_msg *m_current_msg;
+static struct send_msg *m_current_msg = NULL;
+static k_timeout_t m_rx_timeout = K_NO_WAIT;
 
 static const struct device *m_spirit1 = DEVICE_DT_GET(DT_NODELABEL(spirit1));
 static uint64_t m_radio_id;
@@ -75,6 +74,24 @@ static uint8_t *compose_header(uint8_t *buffer, uint16_t msg_id)
 	return buffer;
 }
 
+static void rx_timer_expiry_handler(struct k_timer *timer)
+{
+	int ret = spirit1_rx(m_spirit1, K_SECONDS(1));
+	if (ret) {
+		LOG_ERR("Call `spirit1_rx` failed: %d", ret);
+	}
+}
+
+static void rx_timer_stop_handler(struct k_timer *timer)
+{
+	int ret = spirit1_standby(m_spirit1);
+	if (ret) {
+		LOG_ERR("Call `spirit1_standby` failed: %d", ret);
+	}
+}
+
+K_TIMER_DEFINE(m_rx_timer, rx_timer_expiry_handler, rx_timer_stop_handler);
+
 static int send_msg(struct send_msg *msg)
 {
 	static uint8_t buf[96];
@@ -99,47 +116,59 @@ static int send_msg(struct send_msg *msg)
 	return 0;
 }
 
-static int push_msg(struct send_msg *msg)
-{
-	if (!atomic_flag_test_and_set(&m_busy)) {
-		return send_msg(msg);
-	}
-
-	k_queue_append(&m_send_queue, msg);
-
-	return 0;
-}
-
 int twr_radio_send(void *data, size_t data_len, k_timeout_t timeout)
 {
 	int ret;
+
+	if (k_mutex_lock(&m_mutex, timeout) != 0) {
+		return -EBUSY;
+	}
+
 	struct send_msg msg = {
-		.id = ++m_msg_id_counter,
+		.id = m_msg_id_counter++,
 		.data = data,
 		.data_len = data_len,
 	};
 
 	ret = k_sem_init(&msg.ack_event, 0, 1);
 	if (ret) {
+		k_mutex_unlock(&m_mutex);
 		return ret;
 	}
 
-	ret = push_msg(&msg);
+	k_timer_stop(&m_rx_timer);
+	spirit1_standby(m_spirit1);
+
+	ret = send_msg(&msg);
 	if (ret) {
-		return ret;
+		goto cleanup;
 	}
 
-	if (k_sem_take(&msg.ack_event, timeout)) {
-		return -ETIMEDOUT;
+	if (timeout.ticks > 0) {
+		ret = k_sem_take(&msg.ack_event, timeout);
+		if (ret == -EAGAIN) {
+			ret = -ETIMEDOUT;
+			goto cleanup;
+		}
 	}
 
-	atomic_clear(&m_busy);
+	if (m_rx_timeout.ticks < 0) {
+		k_timer_start(&m_rx_timer, K_NO_WAIT, K_SECONDS(1));
+	} else if (m_rx_timeout.ticks > 0) {
+		ret = spirit1_rx(m_spirit1, m_rx_timeout);
+	}
 
-	return 0;
+cleanup:
+	m_current_msg = NULL;
+	k_sem_reset(&msg.ack_event);
+	k_mutex_unlock(&m_mutex);
+
+	return ret;
 }
 
 static int receive_msg(uint8_t *buf, size_t len)
 {
+	LOG_HEXDUMP_INF(buf, len, "Received buf:");
 	uint64_t radio_id;
 	uint8_t *ptr = buffer_to_radio_id(buf, &radio_id);
 	if (radio_id != m_radio_id) {
@@ -156,12 +185,11 @@ static int receive_msg(uint8_t *buf, size_t len)
 	if (ptr[0] == TWR_RADIO_HEADER_ACK) {
 		if (m_current_msg && m_current_msg->id == msg_id) {
 			k_sem_give(&m_current_msg->ack_event);
-			m_current_msg = NULL;
 		}
 		return 0;
 	}
 
-	// TODO handle sub data and stuff
+	// TODO handle sub data and stuff, these will be offloaded to k_work
 	return 0;
 }
 
@@ -210,7 +238,7 @@ static int init(void)
 
 	LOG_INF("System initialization");
 
-	atomic_clear(&m_busy);
+	m_rx_timeout = K_SECONDS(5);
 
 	const struct device *atsha204 =
 		DEVICE_DT_GET(DT_COMPAT_GET_ANY_STATUS_OKAY(microchip_atsha204));

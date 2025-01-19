@@ -30,4 +30,19 @@ int main(void)
 	} else {
 		LOG_INF("twr_radio_send OK");
 	}
+
+	int count = 0;
+	while (true) {
+		buf[0] = TWR_RADIO_HEADER_PUB_PUSH_BUTTON;
+		buf[1] = ++count;
+
+		ret = twr_radio_send(buf, 2, K_MSEC(1000));
+		if (ret) {
+			LOG_ERR("twr_radio_send failed: %d", ret);
+		} else {
+			LOG_INF("twr_radio_send OK");
+		}
+
+		k_sleep(K_SECONDS(10));
+	}
 }

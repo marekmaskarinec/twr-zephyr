@@ -94,11 +94,6 @@ static void invoke_cb(enum spirit1_event event)
 static void gpio_irq_handler(const struct device *gpiob, struct gpio_callback *cb, uint32_t pins)
 {
 	gpio_pin_interrupt_configure_dt(&dev_config.irq_gpio, GPIO_INT_DISABLE);
-	k_work_submit(&dev_data.irq_work);
-}
-
-static void irq_handler(struct k_work *work)
-{
 	SpiritIrqs irqs;
 	SpiritIrqGetStatus(&irqs);
 
@@ -139,8 +134,6 @@ static int spirit1_init(const struct device *dev)
 	int ret;
 
 	k_mutex_init(&dev_data.lock);
-
-	k_work_init(&dev_data.irq_work, irq_handler);
 
 	if (!spi_is_ready_dt(&dev_config.bus)) {
 		LOG_ERR("SPI device not ready");
@@ -426,6 +419,21 @@ static int api_spirit1_tx(const struct device *dev, bool csma, const void *data,
 	return 0;
 }
 
+static int api_spirit1_standby(const struct device *dev)
+{
+	int ret = k_mutex_lock(&dev_data.lock, K_FOREVER);
+	if (ret) {
+		LOG_ERR("Cannot lock mutex");
+		return ret;
+	}
+
+	go_to_standby();
+
+	k_mutex_unlock(&dev_data.lock);
+
+	return 0;
+}
+
 static int api_spirit1_cw(const struct device *dev, bool enable)
 {
 	k_mutex_lock(&dev_data.lock, K_FOREVER);
@@ -453,6 +461,7 @@ static const struct spirit1_driver_api spirit1_driver_api = {
 	.config = api_spirit1_config,
 	.rx = api_spirit1_rx,
 	.tx = api_spirit1_tx,
+	.standby = api_spirit1_standby,
 	.cw = api_spirit1_cw,
 };
 
