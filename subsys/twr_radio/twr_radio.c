@@ -15,18 +15,13 @@
 
 LOG_MODULE_REGISTER(twr_radio, CONFIG_TWR_RADIO_LOG_LEVEL);
 
-struct send_msg {
-	struct k_sem ack_event;
-	uint16_t id;
-	void *data;
-	size_t data_len;
-};
-
 static K_MUTEX_DEFINE(m_mutex);
 
 static uint16_t m_msg_id_counter = 0;
-static struct send_msg *m_current_msg = NULL;
-static k_timeout_t m_rx_timeout = K_NO_WAIT;
+static struct twr_radio_msg *m_recv_msg = NULL;
+
+static K_SEM_DEFINE(m_tx_done_event, 1, 1);
+static K_SEM_DEFINE(m_recv_event, 1, 1);
 
 static const struct device *m_spirit1 = DEVICE_DT_GET(DT_NODELABEL(spirit1));
 static uint64_t m_radio_id;
@@ -67,56 +62,126 @@ static uint8_t *buffer_to_msg_id(uint8_t *buffer, uint16_t *id)
 	return buffer + 2;
 }
 
-static uint8_t *compose_header(uint8_t *buffer, uint16_t msg_id)
+void twr_radio_dump_msg(struct twr_radio_msg *msg)
 {
-	buffer = radio_id_to_buffer(buffer, m_radio_id);
-	buffer = msg_id_to_buffer(buffer, msg_id);
-	return buffer;
-}
+	LOG_INF("Message:");
+	LOG_INF("  Header: %d", msg->header);
+	LOG_INF("  Type: %d", msg->type);
+	LOG_INF("  ID: %d", msg->id);
 
-static void rx_timer_expiry_handler(struct k_timer *timer)
-{
-	int ret = spirit1_rx(m_spirit1, K_SECONDS(1));
-	if (ret) {
-		LOG_ERR("Call `spirit1_rx` failed: %d", ret);
+	switch (msg->type) {
+	case TWR_RADIO_MSG_TYPE_PUB:
+		LOG_HEXDUMP_INF(msg->pub.data, msg->pub.data_len, "  Data:");
+		break;
+	case TWR_RADIO_MSG_TYPE_NODE:
+		LOG_HEXDUMP_INF(msg->node.data, msg->node.data_len, "  Data:");
+		break;
+	default:
+		break;
 	}
 }
 
-static void rx_timer_stop_handler(struct k_timer *timer)
+static int compose_pub_msg(struct twr_radio_msg *msg, uint8_t *buf, int len)
 {
-	int ret = spirit1_standby(m_spirit1);
-	if (ret) {
-		LOG_ERR("Call `spirit1_standby` failed: %d", ret);
-	}
-}
-
-K_TIMER_DEFINE(m_rx_timer, rx_timer_expiry_handler, rx_timer_stop_handler);
-
-static int send_msg(struct send_msg *msg)
-{
-	static uint8_t buf[96];
-
-	uint8_t *ptr = compose_header(buf, msg->id);
-	memcpy(ptr, msg->data, msg->data_len);
-	size_t msg_size = msg->data_len + (ptr - buf);
-
-	if (msg_size > sizeof(buf)) {
+	if (len < 6 + 2 + 1 + msg->pub.data_len) {
 		return -ENOMEM;
 	}
 
-	m_current_msg = msg;
+	uint8_t *ptr = buf;
 
-	LOG_HEXDUMP_INF(buf, msg_size, "Sending data:");
+	ptr = radio_id_to_buffer(ptr, m_radio_id);
+	ptr = msg_id_to_buffer(ptr, msg->id);
+	*(ptr++) = msg->header;
+	memcpy(ptr, msg->pub.data, msg->pub.data_len);
 
-	int ret = spirit1_tx(m_spirit1, true, buf, msg_size);
+	return ptr - buf + msg->pub.data_len;
+}
+
+static int compose_msg(struct twr_radio_msg *msg, uint8_t *buf, int len)
+{
+	switch (msg->type) {
+	case TWR_RADIO_MSG_TYPE_PUB:
+		return compose_pub_msg(msg, buf, len);
+	default:
+		break;
+	}
+
+	return -EINVAL;
+}
+
+static int send_msg(struct twr_radio_msg *msg)
+{
+	static uint8_t buf[96];
+
+	int len = compose_msg(msg, buf, sizeof(buf));
+	if (len < 0) {
+		return len;
+	}
+
+	LOG_HEXDUMP_DBG(buf, len, "Sending data:");
+
+	k_sem_take(&m_tx_done_event, K_NO_WAIT);
+	int ret = spirit1_tx(m_spirit1, true, buf, len);
 	if (ret) {
 		return ret;
 	}
 
-	return 0;
+	// There's not really a need to customize this timeout, it's just a safety
+	return k_sem_take(&m_tx_done_event, K_MSEC(1000));
 }
 
-int twr_radio_send(void *data, size_t data_len, k_timeout_t timeout)
+int twr_radio_pub(struct twr_radio_msg *msg, k_timeout_t timeout)
+{
+	int ret;
+
+	if (msg->type != TWR_RADIO_MSG_TYPE_PUB) {
+		return -EINVAL;
+	}
+
+	if (k_mutex_lock(&m_mutex, timeout) != 0) {
+		return -EBUSY;
+	}
+
+	if (msg->id == 0) {
+		msg->id = m_msg_id_counter++;
+	}
+
+	k_sem_reset(&m_recv_event);
+
+	spirit1_standby(m_spirit1);
+
+	ret = send_msg(msg);
+	if (ret) {
+		goto cleanup;
+	}
+
+	if (timeout.ticks == 0) {
+		goto cleanup;
+	}
+
+	struct twr_radio_msg recv;
+	do {
+		m_recv_msg = &recv;
+		ret = spirit1_rx(m_spirit1, timeout);
+		if (ret) {
+			goto cleanup;
+		}
+
+		ret = k_sem_take(&m_recv_event, timeout);
+		if (ret == -EAGAIN) {
+			ret = -ETIMEDOUT;
+			goto cleanup;
+		}
+	} while (m_recv_msg->id != msg->id && m_recv_msg->header != TWR_RADIO_HEADER_ACK);
+
+cleanup:
+	k_sem_reset(&m_recv_event);
+	k_mutex_unlock(&m_mutex);
+
+	return ret;
+}
+
+int twr_radio_recv(struct twr_radio_msg *msg, k_timeout_t timeout)
 {
 	int ret;
 
@@ -124,72 +189,95 @@ int twr_radio_send(void *data, size_t data_len, k_timeout_t timeout)
 		return -EBUSY;
 	}
 
-	struct send_msg msg = {
-		.id = m_msg_id_counter++,
-		.data = data,
-		.data_len = data_len,
-	};
+	m_recv_msg = msg;
 
-	ret = k_sem_init(&msg.ack_event, 0, 1);
-	if (ret) {
-		k_mutex_unlock(&m_mutex);
-		return ret;
-	}
+	k_sem_take(&m_recv_event, K_NO_WAIT);
 
-	k_timer_stop(&m_rx_timer);
-	spirit1_standby(m_spirit1);
-
-	ret = send_msg(&msg);
+	ret = spirit1_rx(m_spirit1, timeout);
 	if (ret) {
 		goto cleanup;
 	}
 
-	if (timeout.ticks > 0) {
-		ret = k_sem_take(&msg.ack_event, timeout);
-		if (ret == -EAGAIN) {
-			ret = -ETIMEDOUT;
-			goto cleanup;
-		}
-	}
-
-	if (m_rx_timeout.ticks < 0) {
-		k_timer_start(&m_rx_timer, K_NO_WAIT, K_SECONDS(1));
-	} else if (m_rx_timeout.ticks > 0) {
-		ret = spirit1_rx(m_spirit1, m_rx_timeout);
+	ret = k_sem_take(&m_recv_event, timeout);
+	if (ret == -EAGAIN) {
+		ret = -ETIMEDOUT;
+		goto cleanup;
+	} else if (ret) {
+		goto cleanup;
 	}
 
 cleanup:
-	m_current_msg = NULL;
-	k_sem_reset(&msg.ack_event);
+	k_sem_reset(&m_recv_event);
 	k_mutex_unlock(&m_mutex);
-
 	return ret;
+}
+
+static int parse_pub_msg(struct twr_radio_msg *msg, uint8_t *buf, size_t len)
+{
+	uint8_t *ptr = buf;
+	uint64_t id;
+
+	ptr = buffer_to_radio_id(ptr, &id);
+	ptr = buffer_to_msg_id(ptr, &msg->id);
+	msg->header = *ptr++;
+	msg->pub.data_len = len - (ptr - buf);
+	memcpy(msg->pub.data, ptr, msg->pub.data_len);
+
+	return 0;
+}
+
+static int parse_node_msg(struct twr_radio_msg *msg, uint8_t *buf, size_t len)
+{
+	uint8_t *ptr = buf;
+	uint64_t id;
+
+	ptr = buffer_to_radio_id(ptr, &msg->node.source_id);
+	ptr = buffer_to_msg_id(ptr, &msg->id);
+	msg->header = *ptr++;
+	ptr = buffer_to_radio_id(ptr, &id);
+	if (id != m_radio_id) {
+		return 1;
+	}
+	msg->node.data_len = len - (ptr - buf);
+	memcpy(msg->node.data, ptr, msg->node.data_len);
+
+	return 0;
+}
+
+static int parse_msg(struct twr_radio_msg *msg, uint8_t *buf, size_t len)
+{
+	uint64_t id;
+	buffer_to_radio_id(buf, &id);
+
+	// If the ID is ours, the message is probably an ACK
+	if (id == m_radio_id) {
+		return parse_pub_msg(msg, buf, len);
+	}
+
+	return parse_node_msg(msg, buf, len);
 }
 
 static int receive_msg(uint8_t *buf, size_t len)
 {
-	LOG_HEXDUMP_INF(buf, len, "Received buf:");
-	uint64_t radio_id;
-	uint8_t *ptr = buffer_to_radio_id(buf, &radio_id);
-	if (radio_id != m_radio_id) {
+	LOG_HEXDUMP_DBG(buf, len, "Received data:");
+
+	if (m_recv_msg == NULL) {
+		k_sem_give(&m_recv_event);
 		return 0;
 	}
 
-	uint16_t msg_id = 0;
-	ptr = buffer_to_msg_id(ptr, &msg_id);
-
-	size_t msg_len = len - (ptr - buf);
-
-	LOG_HEXDUMP_INF(ptr, msg_len, "Received data:");
-
-	if (ptr[0] == TWR_RADIO_HEADER_ACK) {
-		if (m_current_msg && m_current_msg->id == msg_id) {
-			k_sem_give(&m_current_msg->ack_event);
-		}
+	int ret = parse_msg(m_recv_msg, buf, len);
+	if (ret < 0) {
+		m_recv_msg = NULL;
+		LOG_ERR("Failed to parse message: %d", ret);
+	} else if (ret > 0) {
+		m_recv_msg = NULL;
+		LOG_DBG("Message for another radio");
 		return 0;
 	}
 
-	// TODO handle sub data and stuff, these will be offloaded to k_work
+	k_sem_give(&m_recv_event);
+
 	return 0;
 }
 
@@ -199,7 +287,7 @@ static int spirit_event_cb(enum spirit1_event event, void *user_data)
 
 	switch (event) {
 	case SPIRIT1_EVENT_RX_DATA_READY:
-		LOG_INF("SPIRIT1_EVENT_RX_DATA_READY\n");
+		LOG_DBG("SPIRIT1_EVENT_RX_DATA_READY\n");
 		static uint8_t buf[96];
 
 		ret = spirit1_get_rx_data(m_spirit1, buf, sizeof(buf));
@@ -210,22 +298,20 @@ static int spirit_event_cb(enum spirit1_event event, void *user_data)
 
 		return receive_msg(buf, ret);
 	case SPIRIT1_EVENT_RX_DATA_DISC:
-		LOG_INF("SPIRIT1_EVENT_RX_DATA_DISC\n");
+		LOG_DBG("SPIRIT1_EVENT_RX_DATA_DISC\n");
 		break;
 	case SPIRIT1_EVENT_RX_TIMEOUT:
-		LOG_INF("SPIRIT1_EVENT_RX_TIMEOUT\n");
+		LOG_DBG("SPIRIT1_EVENT_RX_TIMEOUT\n");
 		break;
 	case SPIRIT1_EVENT_TX_DATA_SENT:
-		LOG_INF("SPIRIT1_EVENT_TX_DATA_SENT\n");
-
-		spirit1_rx(m_spirit1, K_SECONDS(1));
-
+		LOG_DBG("SPIRIT1_EVENT_TX_DATA_SENT\n");
+		k_sem_give(&m_tx_done_event);
 		break;
 	case SPIRIT1_EVENT_MAX_BO_CCA_REACH:
-		LOG_INF("SPIRIT1_EVENT_MAX_BO_CCA_REACH\n");
+		LOG_DBG("SPIRIT1_EVENT_MAX_BO_CCA_REACH\n");
 		break;
 	default:
-		LOG_INF("Unknown event\n");
+		LOG_DBG("Unknown event\n");
 		break;
 	}
 
@@ -237,8 +323,6 @@ static int init(void)
 	int ret;
 
 	LOG_INF("System initialization");
-
-	m_rx_timeout = K_SECONDS(5);
 
 	const struct device *atsha204 =
 		DEVICE_DT_GET(DT_COMPAT_GET_ANY_STATUS_OKAY(microchip_atsha204));
