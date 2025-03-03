@@ -1,2 +1,3 @@
 
 add_subdirectory_ifdef(CONFIG_TWR_RADIO twr_radio)
+add_subdirectory_ifdef(CONFIG_TWR_DICE twr_dice)

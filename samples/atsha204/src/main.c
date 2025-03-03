@@ -35,14 +35,6 @@ int main(void)
 		return 0;
 	}
 
-	uint64_t sn;
-	ret = atsha204_read_sn(atsha204, &sn);
-	if (ret) {
-		LOG_ERR("Call `atsha204_read_sn` failed: %d", ret);
-	} else {
-		LOG_INF("SN: %llu", sn);
-	}
-
 	while (1) {
 		ret = gpio_pin_toggle_dt(&led);
 		if (ret < 0) {
@@ -51,6 +43,14 @@ int main(void)
 
 		led_state = !led_state;
 		k_msleep(2000);
+
+		uint64_t sn;
+		ret = atsha204_read_sn(atsha204, &sn);
+		if (ret) {
+			LOG_ERR("Call `atsha204_read_sn` failed: %d", ret);
+		} else {
+			LOG_INF("SN: %llu", sn);
+		}
 	}
 	return 0;
 }

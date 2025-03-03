@@ -1,0 +1,11 @@
+
+config TWR_DICE
+	bool "TWR_DICE"
+	
+if TWR_DICE
+
+module = TWR_DICE
+module-str = Tower Dice
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # TWR_RADIO

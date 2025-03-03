@@ -1,0 +1,15 @@
+menu "Application"
+
+config FW_NAME
+	string "Firmware Name"
+	default "push-button"
+
+config FW_VERSION
+	string "Firmware Version"
+	default "v1.0.0"
+
+endmenu
+
+menu "Zephyr Kernel"
+source "Kconfig.zephyr"
+endmenu
